@@ -1,5 +1,5 @@
 # deploy_script.R
-# VMI Baseball App Deployment Script
+# Creighton Baseball App Deployment Script
 # Deploys the Shiny app to shinyapps.io
 
 # Set CRAN repository
@@ -77,7 +77,7 @@ deploy_app <- function() {
 
 # Run deployment
 if (!interactive()) {
-  cat("VMI - Deployment Script\n")
+  cat("Creighton - Deployment Script\n")
   cat("==========================================\n")
   success <- deploy_app()
   if (!success) {
