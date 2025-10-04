@@ -1,5 +1,5 @@
 # automated_data_sync.R
-# VMI Baseball Data Automation Script
+# Creighton Baseball Data Automation Script
 # Syncs data from TrackMan FTP, filters for VMI only
 
 library(RCurl)
@@ -303,7 +303,7 @@ deduplicate_files <- function() {
 
 # Main sync function
 main_sync <- function() {
-  cat("Starting VMI data sync at", as.character(Sys.time()), "\n")
+  cat("Starting Creighton data sync at", as.character(Sys.time()), "\n")
   
   start_time <- Sys.time()
   
