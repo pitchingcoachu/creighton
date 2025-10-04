@@ -149,8 +149,8 @@ js_sort <-
   paste0("}")
 
 # ---- Notes API config ----
-NOTES_API_URL   <- "https://script.google.com/macros/s/AKfycbxE-gkSNBlnEmwf2VZVEkYlZ5YcsonF-Ap7A4v6y3HuaxPB4ikFe6Pc3HoEQ3UYstPkmw/exec"
-NOTES_API_TOKEN <- "vmibaseball"
+NOTES_API_URL   <- "https://script.google.com/macros/s/AKfycbyj6V7Ih0ndNNcy3QXXEqbnuHKIXiL2dKhVRtr4Vz_4OfGXOwjPBMth6skm1nWjLteS/exec"
+NOTES_API_TOKEN <- "creightonbaseball"
 
 # small helper
 # Replace the old %or% with this scalar-safe version
@@ -1704,24 +1704,26 @@ catcher_map <- setNames(raw_catchers, catch_display)
 
 # ==== PITCHERS-ONLY WHITELIST ====
 ALLOWED_PITCHERS <- c(
-  "Jones, Andrew",
-  "Driscoll, Clark",
-  "Biernot, Gavin",
-  "Sipe, Hunter",
-  "Douthat, Jim",
-  "Spiegel, Justin",
-  "Williamson, Nolan",
-  "Riley, Owen",
-  "Dhein, Peyton",
-  "Velasquez, Roberto",
-  "Taylor, Carson",
-  "Tyndall, Eli",
-  "Ahrens, Gary",
-  "Chevalier, George",
-  "Melescu, Miles",
-  "Lafine, Noah",
-  "Monroe, Trace",
-  "Bassett, Tyler"
+  "Pineau, Jack",
+  "Wendt, Shea",
+  "Stratton, Evan",
+  "Hauser, Joe",
+  "VaDeer, Hunter",
+  "Gould, Brian",
+  "Koosman, Ian",
+  "Unga, Anthony",
+  "Nissan, Eli",
+  "Curtin, Shane",
+  "Burke, Jimmy",
+  "Flores, Gavin",
+  "Magers, Wilson",
+  "Ruhl, Jakob",
+  "Strenke, Brendan",
+  "Adams, JT",
+  "Prindl, Henry",
+  "O'Malley, Robert",
+  "Goldenbaum, Matt",
+  "McClellan, Max"
   # add more…
 )
 
