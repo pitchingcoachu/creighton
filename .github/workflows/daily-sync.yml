@@ -1,4 +1,4 @@
-name: Daily VMI Data Sync and Deploy
+name: Daily Creighton Data Sync and Deploy
 
 on:
   schedule:
