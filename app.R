@@ -7744,7 +7744,7 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     tags$style(HTML("
     /* Custom note button color */
     #openNote.btn-note {
-      background-color:#FDD023;   /* base */
+      background-color:#003366;   /* base */
       border-color:#ffffff;
       color:#fff;
     }
@@ -7752,7 +7752,7 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     #openNote.btn-note:focus,
     #openNote.btn-note:active,
     #openNote.btn-note:active:focus {
-      background-color:#461D7C;   /* hover/active */
+      background-color:#0066cc;   /* hover/active */
       border-color:#ffffff;
       color:#fff;
       outline:none;
