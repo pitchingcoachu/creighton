@@ -8451,7 +8451,7 @@ server <- function(input, output, session) {
     tagList(
       radioButtons(
         "dpTableMode", label = NULL,
-        choices  = c("Stuff","Process","Results","Banny","Custom"),
+        choices  = c("Stuff","Process","Results","","Custom"),
         selected = sel,
         inline   = TRUE
       ),
@@ -23001,7 +23001,7 @@ server <- function(input, output, session) {
     tagList(
       radioButtons(
         "summaryTableMode", label = NULL,
-        choices  = c("Stuff","Process","Results","Banny","Custom"),
+        choices  = c("Stuff","Process","Results","","Custom"),
         selected = sel,
         inline   = TRUE
       ),
