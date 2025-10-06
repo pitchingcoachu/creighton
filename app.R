@@ -7924,7 +7924,7 @@ ui <- tagList(
   tags$style(HTML("
     /* Custom note button color */
     #openNote.btn-note {
-      background-color:#552B9A;   /* base */
+      background-color:#005EB8;   /* base */
       border-color:#ffffff;
       color:#fff;
     }
