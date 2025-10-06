@@ -7837,8 +7837,8 @@ ui <- tagList(
   # --- Custom navbar colors & styling ---
   tags$head(
     tags$style(HTML("
-      /* Black navbar */
-      .navbar-inverse { background-color:#000000; border-color:#000000; }
+      /* Creighton-inspired navy navbar */
+      .navbar-inverse { background-color:#002D72; border-color:#002D72; }
       .navbar { position:relative; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
 
       /* Brand area with two logos side-by-side (left side) */
@@ -7874,19 +7874,24 @@ ui <- tagList(
       /* Tab links */
       .navbar-inverse .navbar-nav>li>a { color:#f2f2f2 !important; font-weight:600; }
       .navbar-inverse .navbar-nav>li>a:hover,
-      .navbar-inverse .navbar-nav>li>a:focus { color:#552B9A !important; background:transparent; }
+      .navbar-inverse .navbar-nav>li>a:focus { color:#00A3E0 !important; background:transparent; }
 
       /* Active tab */
       .navbar-inverse .navbar-nav>.active>a,
       .navbar-inverse .navbar-nav>.active>a:hover,
       .navbar-inverse .navbar-nav>.active>a:focus {
-        color:#ffffff !important; background-color:#552B9A !important;
+        color:#ffffff !important; background-color:#005EB8 !important;
       }
 
       /* Add Note button */
       #openNote {
         border-radius: 999px; padding: 10px 12px; font-size: 16px;
         box-shadow: 0 2px 8px rgba(0,0,0,.25);
+        background-color:#00A3E0; color:#ffffff; border:1px solid #002D72;
+      }
+      #openNote:hover,
+      #openNote:focus {
+        background-color:#005EB8; color:#ffffff;
       }
     "))
   ),
