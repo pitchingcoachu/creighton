@@ -8055,7 +8055,7 @@ server <- function(input, output, session) {
     }
   }, ignoreInit = TRUE)
   
-  admin_emails <- c("jgaynor@pitchingcoachu.com", "banni17@yahoo.com", "micaiahtucker@gmail.com")
+  admin_emails <- c("jgaynor@pitchingcoachu.com", "michaelcurrent@creighton.edu", "billymohl@creighton.edu", "willmcgillis@creighton.edu", "markkingston@creighton.edu", "logantolbert@creighton.edu")
   # helper to normalize email
   norm_email <- function(x) tolower(trimws(x))
   
