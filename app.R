@@ -1,9 +1,7 @@
-# app.R
 # Shiny pitching report with per-player privacy + admin view + customized Stuff+ metric per pitch type
 
 library(shiny)
 library(dplyr)
-library(purrr)
 library(DT)
 library(gridExtra)
 library(ggplot2)
@@ -82,6 +80,8 @@ draw_heat <- function(grid, bins = HEAT_BINS, pal_fun = heat_pal_red,
 
 
 library(curl)  # for curl::form_file
+library(DBI)   # for database operations
+library(RSQLite)  # for SQLite database
 
 # Configure Cloudinary (recommended simple host for images/videos)
 # Create a free account, make an *unsigned upload preset*, then set these:
@@ -121,6 +121,180 @@ upload_media_cloudinary <- function(path) {
     url  = j$secure_url %||% j$url,
     type = j$resource_type %||% "auto"  # "image" | "video" | "raw"
   )
+}
+
+# ---- Database functions for persistent pitch modifications ----
+
+# Initialize modifications database
+init_modifications_db <- function() {
+  db_path <- "pitch_modifications.db"
+  con <- dbConnect(SQLite(), db_path)
+  
+  # Create table if it doesn't exist
+  if (!dbExistsTable(con, "modifications")) {
+    dbExecute(con, "
+      CREATE TABLE modifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pitcher TEXT NOT NULL,
+        date TEXT NOT NULL,
+        rel_speed REAL,
+        horz_break REAL,
+        induced_vert_break REAL,
+        plate_loc_side REAL,
+        plate_loc_height REAL,
+        pitch_no REAL,
+        original_pitch_type TEXT,
+        new_pitch_type TEXT NOT NULL,
+        modified_at TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    ")
+    
+    # Create index for faster lookups
+    dbExecute(con, "
+      CREATE INDEX idx_pitch_lookup ON modifications 
+      (pitcher, date, rel_speed, horz_break, induced_vert_break, pitch_no)
+    ")
+  } else {
+    # Check if we need to add new columns for existing databases
+    columns <- dbGetQuery(con, "PRAGMA table_info(modifications)")$name
+    
+    if (!"plate_loc_side" %in% columns) {
+      dbExecute(con, "ALTER TABLE modifications ADD COLUMN plate_loc_side REAL")
+    }
+    if (!"plate_loc_height" %in% columns) {
+      dbExecute(con, "ALTER TABLE modifications ADD COLUMN plate_loc_height REAL")
+    }
+    if (!"pitch_no" %in% columns) {
+      dbExecute(con, "ALTER TABLE modifications ADD COLUMN pitch_no REAL")
+    }
+  }
+  
+  dbDisconnect(con)
+  return(db_path)
+}
+
+# Save pitch modifications to database
+save_pitch_modifications_db <- function(selected_pitches, new_type) {
+  db_path <- "pitch_modifications.db"
+  con <- dbConnect(SQLite(), db_path)
+  
+  tryCatch({
+    # Prepare new modifications with additional identifying fields
+    new_mods <- data.frame(
+      pitcher = selected_pitches$Pitcher,
+      date = as.character(selected_pitches$Date),
+      rel_speed = as.numeric(selected_pitches$RelSpeed %||% 0),
+      horz_break = as.numeric(selected_pitches$HorzBreak %||% 0),
+      induced_vert_break = as.numeric(selected_pitches$InducedVertBreak %||% 0),
+      plate_loc_side = as.numeric(selected_pitches$PlateLocSide %||% 0),
+      plate_loc_height = as.numeric(selected_pitches$PlateLocHeight %||% 0),
+      pitch_no = as.numeric(selected_pitches$PitchNo %||% 0),
+      original_pitch_type = selected_pitches$TaggedPitchType,
+      new_pitch_type = new_type,
+      modified_at = as.character(Sys.time()),
+      stringsAsFactors = FALSE
+    )
+    
+    # Remove existing modifications for the same pitches using robust matching
+    for (i in 1:nrow(new_mods)) {
+      # Try multiple matching strategies to be more reliable
+      # Strategy 1: Exact pitch number match (most reliable)
+      if (!is.na(new_mods$pitch_no[i]) && new_mods$pitch_no[i] > 0) {
+        dbExecute(con, "
+          DELETE FROM modifications 
+          WHERE pitcher = ? AND date = ? AND pitch_no = ?
+        ", list(
+          new_mods$pitcher[i],
+          new_mods$date[i], 
+          new_mods$pitch_no[i]
+        ))
+      } else {
+        # Strategy 2: Movement + velocity matching with wider tolerance
+        dbExecute(con, "
+          DELETE FROM modifications 
+          WHERE pitcher = ? AND date = ? 
+          AND ABS(rel_speed - ?) < 0.5 
+          AND ABS(horz_break - ?) < 0.5 
+          AND ABS(induced_vert_break - ?) < 0.5
+        ", list(
+          new_mods$pitcher[i],
+          new_mods$date[i], 
+          new_mods$rel_speed[i],
+          new_mods$horz_break[i],
+          new_mods$induced_vert_break[i]
+        ))
+      }
+    }
+    
+    # Insert new modifications
+    dbWriteTable(con, "modifications", new_mods, append = TRUE)
+    
+    message(sprintf("Saved %d pitch type modifications to database", nrow(new_mods)))
+    
+  }, finally = {
+    dbDisconnect(con)
+  })
+}
+
+# Load and apply modifications from database
+load_pitch_modifications_db <- function(pitch_data) {
+  db_path <- "pitch_modifications.db"
+  
+  if (!file.exists(db_path)) {
+    return(pitch_data %>% mutate(original_row_id = row_number()))
+  }
+  
+  con <- dbConnect(SQLite(), db_path)
+  
+  tryCatch({
+    # Get all modifications
+    mods <- dbGetQuery(con, "SELECT * FROM modifications ORDER BY created_at")
+    
+    if (nrow(mods) == 0) {
+      return(pitch_data %>% mutate(original_row_id = row_number()))
+    }
+    
+    temp_data <- pitch_data %>% mutate(original_row_id = row_number())
+    
+    # Apply modifications using robust matching
+    modifications_applied <- 0
+    for (i in 1:nrow(mods)) {
+      mod <- mods[i, ]
+      
+      # Strategy 1: Try exact pitch number match first (most reliable)
+      if (!is.na(mod$pitch_no) && mod$pitch_no > 0 && "PitchNo" %in% names(temp_data)) {
+        match_idx <- which(
+          temp_data$Pitcher == mod$pitcher &
+          temp_data$Date == mod$date &
+          abs(as.numeric(temp_data$PitchNo) - mod$pitch_no) < 0.1
+        )
+      } else {
+        # Strategy 2: Movement + velocity matching with wider tolerance
+        match_idx <- which(
+          temp_data$Pitcher == mod$pitcher &
+          temp_data$Date == mod$date &
+          abs(as.numeric(temp_data$RelSpeed) - mod$rel_speed) < 0.5 &
+          abs(as.numeric(temp_data$HorzBreak) - mod$horz_break) < 0.5 &
+          abs(as.numeric(temp_data$InducedVertBreak) - mod$induced_vert_break) < 0.5
+        )
+      }
+      
+      if (length(match_idx) > 0) {
+        temp_data$TaggedPitchType[match_idx[1]] <- mod$new_pitch_type
+        modifications_applied <- modifications_applied + 1
+      }
+    }
+    
+    if (modifications_applied > 0) {
+      message(sprintf("Applied %d stored pitch type modifications", modifications_applied))
+    }
+    
+    return(temp_data)
+    
+  }, finally = {
+    dbDisconnect(con)
+  })
 }
 
 
@@ -458,7 +632,7 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
 stuff_cols    <- c("Pitch","#","Velo","Max","IVB","HB","rTilt","bTilt", "SpinEff","Spin","Height","Side","Ext","VAA","HAA","Stuff+")
 process_cols  <- c("Pitch","#","BF","Usage","InZone%","Comp%","Strike%","FPS%","E+A%","Whiff%","CSW%","EV","LA","Ctrl+","QP+")
 results_cols  <- c("Pitch","#","BF","IP","K%","BB%","BABIP","GB%","Barrel%","AVG","SLG","xWOBA","xISO","FIP","WHIP","Pitching+")
-banny_cols    <- c("Pitch","Usage","Strike%","InZone%","Comp%","Velo","IVB","HB","Stuff+","QP+","Pitching+")
+banny_cols    <- c("Pitch","Usage","Strike%","InZone%","Comp%","Velo","Max","IVB","HB","Stuff+","QP+","Pitching+")
 perf_cols     <- c("Pitch","#","BF","Usage","InZone%","Comp%","Strike%","FPS%","E+A%","K%","BB%","Whiff%","CSW%","EV","LA","Ctrl+","QP+","Pitching+")
 # all_table_cols will auto-include QP+ via the union
 
@@ -746,6 +920,7 @@ make_hover_tt <- function(df) {
     "<br>Velo: ", ifelse(is.na(df$RelSpeed), "", sprintf("%.1f mph", df$RelSpeed)),
     "<br>IVB: " , ifelse(is.na(df$InducedVertBreak), "", sprintf("%.1f in", df$InducedVertBreak)),
     "<br>HB: "  , ifelse(is.na(df$HorzBreak), "", sprintf("%.1f in", df$HorzBreak)),
+    "<br>Stuff+: ", ifelse(is.na(df$`Stuff+`), "", sprintf("%.1f", df$`Stuff+`)),
     "<br>In Zone: ", inzone_label(df$PlateLocSide, df$PlateLocHeight)
   )
 }
@@ -833,8 +1008,8 @@ pitch_weights_si <- tibble(
                       "Cutter","Slider","Sweeper","Curveball",
                       "ChangeUp","Splitter"),
   w_vel = c(0.6, 0.5, 0.5, 0.4, 0.3, 0.5, 0.2, 0.1),
-  w_ivb = c(0.3, 0.3, 0.2, 0.4, 0.1, 0.5, 0.6, 0.85),
-  w_hb  = c(0.1, 0.2, 0.3, 0.2, 0.6, 0.0, 0.2, 0.05)
+  w_ivb = c(0.3, 0.3, 0.2, 0.4, 0.1, 0.5, 0.7, 0.85),
+  w_hb  = c(0.1, 0.2, 0.3, 0.2, 0.6, 0.0, 0.1, 0.05)
 )
 
 # ---- Simplified Stuff+ Helper (vectorized, RelHeight-based FB/SI) ----
@@ -844,11 +1019,11 @@ compute_stuff_simple <- function(df, base_type, level) {
   
   # prepare data and join weights
   df2 <- df %>%
-    mutate(
+    dplyr::mutate(
       TaggedPitchType = as.character(TaggedPitchType),
       HB_adj = ifelse(PitcherThrows == "Left", HorzBreak, -HorzBreak)
     ) %>%
-    left_join(weight_tbl, by = "TaggedPitchType")
+    dplyr::left_join(weight_tbl, by = "TaggedPitchType")
   
   # velocity baselines
   base_vel <- mean(df2$RelSpeed[df2$TaggedPitchType == base_type], na.rm = TRUE)
@@ -1724,7 +1899,6 @@ ALLOWED_PITCHERS <- c(
   "O'Malley, Robert",
   "Goldenbaum, Matt",
   "McClellan, Max"
-  # add more…
 )
 
 `%in_ci%` <- function(x, y) tolower(x) %in% tolower(y)
@@ -7659,30 +7833,30 @@ player_plans_ui <- function() {
 }
 
 
-  ui <- tagList(
-    # --- Custom navbar colors & styling ---
-    tags$head(
-      tags$style(HTML("
-      /* Creighton navbar */
-      .navbar-inverse { background-color:#003366; border-color:#003366; }
-      .navbar { box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+ui <- tagList(
+  # --- Custom navbar colors & styling ---
+  tags$head(
+    tags$style(HTML("
+      /* Black navbar */
+      .navbar-inverse { background-color:#000000; border-color:#000000; }
+      .navbar { position:relative; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
 
-      /* Brand area with two logos side-by-side */
+      /* Brand area with two logos side-by-side (left side) */
       .navbar-inverse .navbar-brand {
         color:#ffffff !important;
         font-weight:700;
-        display:flex;
-        align-items:center;
-        gap:10px;
-        padding-top:10px;
+        display:flex;                /* keep the images on one line */
+        align-items:center;          /* vertical centering */
+        gap:10px;                    /* space between the two logos/text */
+        padding-top:10px;            /* keep consistent with logo height */
         padding-bottom:10px;
       }
       .navbar-inverse .navbar-brand .brand-logo {
-        height:28px;
+        height:28px;                 /* match heights */
         display:inline-block;
-        margin-top:-2px;
+        margin-top:-2px;             /* tiny optical lift */
       }
-      
+
       /* Put the PCU logo on the far right of the navbar */
       .navbar .pcu-right {
         position:absolute;
@@ -7698,14 +7872,15 @@ player_plans_ui <- function() {
       }
 
       /* Tab links */
-      .navbar-inverse .navbar-nav>li>a { color:#ffffff !important; font-weight:600; }
-      .navbar-inverse .navbar-nav>li:not(.active)>a:hover,
-      .navbar-inverse .navbar-nav>li:not(.active)>a:focus { color:#66b3ff !important; background:transparent; }
+      .navbar-inverse .navbar-nav>li>a { color:#f2f2f2 !important; font-weight:600; }
+      .navbar-inverse .navbar-nav>li>a:hover,
+      .navbar-inverse .navbar-nav>li>a:focus { color:#552B9A !important; background:transparent; }
+
+      /* Active tab */
       .navbar-inverse .navbar-nav>.active>a,
       .navbar-inverse .navbar-nav>.active>a:hover,
       .navbar-inverse .navbar-nav>.active>a:focus {
-        color:#ffffff !important;
-        background-color:#0066cc !important;
+        color:#ffffff !important; background-color:#552B9A !important;
       }
 
       /* Add Note button */
@@ -7714,10 +7889,10 @@ player_plans_ui <- function() {
         box-shadow: 0 2px 8px rgba(0,0,0,.25);
       }
     "))
-    ),
-    
-    # --- Global click handler for Notes → jump back to saved view ---
-    tags$script(HTML("
+  ),
+  
+  # --- Global click handler for Notes → jump back to saved view ---
+  tags$script(HTML("
     document.addEventListener('click', function(e){
       var a = e.target.closest('a.note-jump'); if(!a) return;
       e.preventDefault();
@@ -7728,23 +7903,23 @@ player_plans_ui <- function() {
       }, {priority:'event'});
     }, true);
   ")),
-    
-    tags$script(HTML("
-// Avoid double-binding by namespacing and unbinding first
-$(document).off('click.pcuOpenMedia', 'a.open-media')
-  .on('click.pcuOpenMedia', 'a.open-media', function(e){
-    e.preventDefault();
-    var url = $(this).data('url') || $(this).attr('href') || '';
-    var typ = (($(this).data('type') || 'auto') + '').toLowerCase();
-    if(!url) return;
-    Shiny.setInputValue('open_media', {url: url, type: typ, nonce: Math.random()}, {priority:'event'});
-  });
-")),
-    
-    tags$style(HTML("
+  
+  tags$script(HTML("
+  // Avoid double-binding by namespacing and unbinding first
+  $(document).off('click.pcuOpenMedia', 'a.open-media')
+    .on('click.pcuOpenMedia', 'a.open-media', function(e){
+      e.preventDefault();
+      var url = $(this).data('url') || $(this).attr('href') || '';
+      var typ = (($(this).data('type') || 'auto') + '').toLowerCase();
+      if(!url) return;
+      Shiny.setInputValue('open_media', {url: url, type: typ, nonce: Math.random()}, {priority:'event'});
+    });
+  ")),
+  
+  tags$style(HTML("
     /* Custom note button color */
     #openNote.btn-note {
-      background-color:#003366;   /* base */
+      background-color:#552B9A;   /* base */
       border-color:#ffffff;
       color:#fff;
     }
@@ -7752,24 +7927,25 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     #openNote.btn-note:focus,
     #openNote.btn-note:active,
     #openNote.btn-note:active:focus {
-      background-color:#0066cc;   /* hover/active */
+      background-color:#000000;   /* hover/active */
       border-color:#ffffff;
       color:#fff;
       outline:none;
     }
-  ")), 
-    # --- Floating "Add Note" button (top-right, all pages) ---
-    absolutePanel(
-      style = "background:transparent; border:none; box-shadow:none; z-index:2000;",
-      actionButton("openNote", label = NULL, icon = icon("sticky-note"),
-                   class = "btn btn-note", title = "Add Note"),
-      top = 60, right = 12, width = 50, fixed = TRUE, draggable = FALSE
-    ),
+  ")),
+  
+  # --- Floating "Add Note" button (top-right, all pages) ---
+  absolutePanel(
+    style = "background:transparent; border:none; box-shadow:none; z-index:2000;",
+    actionButton("openNote", label = NULL, icon = icon("sticky-note"),
+                 class = "btn btn-note", title = "Add Note"),
+    top = 60, right = 12, width = 50, fixed = TRUE, draggable = FALSE
+  ),
   
   
   navbarPage(
     title = tagList(
-      tags$img(src = "CREIGHTONlogo.png", class = "brand-logo", alt = "CREIGHTON"),
+      tags$img(src = "CREIGHTONlogo.png", class = "brand-logo", alt = "GCU"),
       tags$span("Dashboard", class = "brand-title"),
       tags$img(src = "PCUlogo.png", class = "pcu-right", alt = "PCU")
     ),
@@ -7799,35 +7975,14 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
 # Server logic
 server <- function(input, output, session) {
   
+  # Initialize database on startup
+  init_modifications_db()
+  
   # Reactive value to store modified pitch data with edits persisted
   modified_pitch_data <- reactiveVal()
   
-  # Load existing modifications if they exist
-  modifications_file <- "pitch_modifications.rds"
-  if (file.exists(modifications_file)) {
-    stored_mods <- readRDS(modifications_file)
-    temp_data <- pitch_data_pitching %>%
-      mutate(original_row_id = row_number())  # Add unique identifier
-    # Apply stored modifications
-    for (i in seq_len(nrow(stored_mods))) {
-      mod <- stored_mods[i, ]
-      # Find matching rows using multiple fields for robustness
-      match_idx <- which(
-        temp_data$Pitcher == mod$Pitcher &
-        temp_data$Date == mod$Date &
-        abs(temp_data$RelSpeed - (mod$RelSpeed %||% 0)) < 0.1 &
-        abs(temp_data$HorzBreak - (mod$HorzBreak %||% 0)) < 0.1 &
-        abs(temp_data$InducedVertBreak - (mod$InducedVertBreak %||% 0)) < 0.1
-      )
-      if (length(match_idx) > 0) {
-        # If multiple matches, take the first one
-        temp_data$TaggedPitchType[match_idx[1]] <- mod$new_pitch_type
-      }
-    }
-    modified_pitch_data(temp_data)
-  } else {
-    modified_pitch_data(pitch_data_pitching %>% mutate(original_row_id = row_number()))
-  }
+  # Load and apply existing modifications from database
+  modified_pitch_data(load_pitch_modifications_db(pitch_data_pitching))
   
   session_label_from <- function(df) {
     s <- unique(na.omit(as.character(df$SessionType)))
@@ -7895,7 +8050,7 @@ server <- function(input, output, session) {
     }
   }, ignoreInit = TRUE)
   
-  admin_emails <- c("jgaynor@pitchingcoachu.com", "crosbyac@vmi.edu")
+  admin_emails <- c("jgaynor@pitchingcoachu.com", "banni17@yahoo.com", "micaiahtucker@gmail.com")
   # helper to normalize email
   norm_email <- function(x) tolower(trimws(x))
   
@@ -8242,7 +8397,7 @@ server <- function(input, output, session) {
     ok <- tryCatch({
       notes_api_add(
         author_email = user_email(),
-        team         = "vmi",
+        team         = "gcu",
         page_combo   = page_combo,
         pitcher      = pit,
         session_type = st,
@@ -10787,27 +10942,41 @@ server <- function(input, output, session) {
     # Update the modified pitch data
     current_data <- modified_pitch_data()
     
-    # Update each selected pitch using multiple matching criteria
+    # Update each selected pitch using robust matching criteria
     for (i in 1:nrow(selected_pitches)) {
       p <- selected_pitches[i, ]
-      # Find matching rows using multiple fields for robustness
-      match_idx <- which(
-        current_data$Pitcher == p$Pitcher &
-        current_data$Date == p$Date &
-        abs(current_data$RelSpeed - (p$RelSpeed %||% 0)) < 0.1 &
-        abs(current_data$HorzBreak - (p$HorzBreak %||% 0)) < 0.1 &
-        abs(current_data$InducedVertBreak - (p$InducedVertBreak %||% 0)) < 0.1
-      )
+      
+      # Strategy 1: Try exact pitch number match first (most reliable)
+      if (!is.na(p$PitchNo) && p$PitchNo > 0) {
+        match_idx <- which(
+          current_data$Pitcher == p$Pitcher &
+          current_data$Date == p$Date &
+          abs(as.numeric(current_data$PitchNo) - (p$PitchNo %||% 0)) < 0.1
+        )
+      } else {
+        # Strategy 2: Movement + velocity matching with wider tolerance
+        match_idx <- which(
+          current_data$Pitcher == p$Pitcher &
+          current_data$Date == p$Date &
+          abs(as.numeric(current_data$RelSpeed) - (p$RelSpeed %||% 0)) < 0.5 &
+          abs(as.numeric(current_data$HorzBreak) - (p$HorzBreak %||% 0)) < 0.5 &
+          abs(as.numeric(current_data$InducedVertBreak) - (p$InducedVertBreak %||% 0)) < 0.5
+        )
+      }
+      
       if (length(match_idx) > 0) {
         current_data$TaggedPitchType[match_idx[1]] <- new_type
+        cat("Updated pitch for", p$Pitcher, "on", p$Date, "to", new_type, "\n")
+      } else {
+        cat("Warning: Could not find matching pitch for", p$Pitcher, "on", p$Date, "\n")
       }
     }
     
     # Update reactive value
     modified_pitch_data(current_data)
     
-    # Save modifications to file
-    save_pitch_modifications(selected_pitches, new_type)
+    # Save modifications to database
+    save_pitch_modifications_db(selected_pitches, new_type)
     
     removeModal()
     session$userData$selected_for_edit <- NULL
@@ -10823,83 +10992,45 @@ server <- function(input, output, session) {
     # Update the modified pitch data
     current_data <- modified_pitch_data()
     
-    # Update each selected pitch using multiple matching criteria
+    # Update each selected pitch using robust matching criteria
     for (i in 1:nrow(selected_pitches)) {
       p <- selected_pitches[i, ]
-      # Find matching rows using multiple fields for robustness
-      match_idx <- which(
-        current_data$Pitcher == p$Pitcher &
-        current_data$Date == p$Date &
-        abs(current_data$RelSpeed - (p$RelSpeed %||% 0)) < 0.1 &
-        abs(current_data$HorzBreak - (p$HorzBreak %||% 0)) < 0.1 &
-        abs(current_data$InducedVertBreak - (p$InducedVertBreak %||% 0)) < 0.1
-      )
+      
+      # Strategy 1: Try exact pitch number match first (most reliable)
+      if (!is.na(p$PitchNo) && p$PitchNo > 0) {
+        match_idx <- which(
+          current_data$Pitcher == p$Pitcher &
+          current_data$Date == p$Date &
+          abs(as.numeric(current_data$PitchNo) - (p$PitchNo %||% 0)) < 0.1
+        )
+      } else {
+        # Strategy 2: Movement + velocity matching with wider tolerance
+        match_idx <- which(
+          current_data$Pitcher == p$Pitcher &
+          current_data$Date == p$Date &
+          abs(as.numeric(current_data$RelSpeed) - (p$RelSpeed %||% 0)) < 0.5 &
+          abs(as.numeric(current_data$HorzBreak) - (p$HorzBreak %||% 0)) < 0.5 &
+          abs(as.numeric(current_data$InducedVertBreak) - (p$InducedVertBreak %||% 0)) < 0.5
+        )
+      }
+      
       if (length(match_idx) > 0) {
         current_data$TaggedPitchType[match_idx[1]] <- new_type
+        cat("Updated pitch for", p$Pitcher, "on", p$Date, "to", new_type, "\n")
+      } else {
+        cat("Warning: Could not find matching pitch for", p$Pitcher, "on", p$Date, "\n")
       }
     }
     
     # Update reactive value
     modified_pitch_data(current_data)
     
-    # Save modifications to file
-    save_pitch_modifications(selected_pitches, new_type)
+    # Save modifications to database
+    save_pitch_modifications_db(selected_pitches, new_type)
     
     removeModal()
     session$userData$selected_for_edit_summary <- NULL
   })
-  
-  # Helper function to save modifications
-  save_pitch_modifications <- function(selected_pitches, new_type) {
-    modifications_file <- "pitch_modifications.rds"
-    
-    # Load existing modifications
-    if (file.exists(modifications_file)) {
-      stored_mods <- readRDS(modifications_file)
-    } else {
-      stored_mods <- data.frame(
-        Pitcher = character(0),
-        Date = as.Date(character(0)),
-        RelSpeed = numeric(0),
-        HorzBreak = numeric(0),
-        InducedVertBreak = numeric(0),
-        original_pitch_type = character(0),
-        new_pitch_type = character(0),
-        modified_at = as.POSIXct(character(0)),
-        stringsAsFactors = FALSE
-      )
-    }
-    
-    # Add new modifications
-    new_mods <- data.frame(
-      Pitcher = selected_pitches$Pitcher,
-      Date = selected_pitches$Date,
-      RelSpeed = selected_pitches$RelSpeed %||% 0,
-      HorzBreak = selected_pitches$HorzBreak %||% 0,
-      InducedVertBreak = selected_pitches$InducedVertBreak %||% 0,
-      original_pitch_type = selected_pitches$TaggedPitchType,
-      new_pitch_type = new_type,
-      modified_at = Sys.time(),
-      stringsAsFactors = FALSE
-    )
-    
-    # Remove any existing modifications for the same pitches (using multiple field matching)
-    for (i in 1:nrow(new_mods)) {
-      stored_mods <- stored_mods[!(
-        stored_mods$Pitcher == new_mods$Pitcher[i] &
-        stored_mods$Date == new_mods$Date[i] &
-        abs(stored_mods$RelSpeed - new_mods$RelSpeed[i]) < 0.1 &
-        abs(stored_mods$HorzBreak - new_mods$HorzBreak[i]) < 0.1 &
-        abs(stored_mods$InducedVertBreak - new_mods$InducedVertBreak[i]) < 0.1
-      ), ]
-    }
-    
-    # Combine and save
-    all_mods <- rbind(stored_mods, new_mods)
-    saveRDS(all_mods, modifications_file)
-    
-    message(sprintf("Saved %d pitch type modifications", nrow(new_mods)))
-  }
   
   # Velocity Plot
   # Helper: pick the first existing column name from a preference list
