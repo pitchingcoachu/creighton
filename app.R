@@ -261,11 +261,67 @@ import_modifications_from_export <- function(con, base_data) {
   mods_csv <- try(readr::read_csv(export_path, show_col_types = FALSE), silent = TRUE)
   if (inherits(mods_csv, "try-error") || !nrow(mods_csv)) return()
   mods_csv <- as.data.frame(mods_csv, stringsAsFactors = FALSE)
+  names(mods_csv) <- tolower(names(mods_csv))
+
+  normalize_col <- function(df, target, candidates) {
+    existing <- intersect(candidates, names(df))
+    if (!length(existing)) {
+      if (!target %in% names(df)) df[[target]] <- NA
+      return(df)
+    }
+    src <- existing[1]
+    if (src != target) {
+      df[[target]] <- df[[src]]
+      df[[src]] <- NULL
+    }
+    df
+  }
+
+  mods_csv <- normalize_col(mods_csv, "pitcher", c("pitcher", "pitcher_name", "player", "name", "pitcherid", "pitcher_id"))
+  mods_csv <- normalize_col(mods_csv, "date", c("date", "game_date", "session_date"))
+  mods_csv <- normalize_col(mods_csv, "rel_speed", c("rel_speed", "relspeed"))
+  mods_csv <- normalize_col(mods_csv, "horz_break", c("horz_break", "hb"))
+  mods_csv <- normalize_col(mods_csv, "induced_vert_break", c("induced_vert_break", "ivb"))
+  mods_csv <- normalize_col(mods_csv, "original_pitch_type", c("original_pitch_type", "old_pitch_type", "from_pitch_type"))
+  mods_csv <- normalize_col(mods_csv, "new_pitch_type", c("new_pitch_type", "pitch_type", "to_pitch_type"))
+  mods_csv <- normalize_col(mods_csv, "modified_at", c("modified_at", "timestamp", "modified"))
+  mods_csv <- normalize_col(mods_csv, "pitch_key", c("pitch_key", "pitchkey"))
+
+  mods_csv$pitcher <- as.character(mods_csv$pitcher)
+  mods_csv$date <- as.character(mods_csv$date)
+  mods_csv$new_pitch_type <- as.character(mods_csv$new_pitch_type)
+  mods_csv$modified_at <- as.character(mods_csv$modified_at)
   if (!"pitch_key" %in% names(mods_csv)) mods_csv$pitch_key <- NA_character_
   mods_csv <- attach_pitch_keys_to_mods(mods_csv, base_data)
   existing <- try(dbGetQuery(con, "SELECT pitch_key FROM modifications"), silent = TRUE)
   existing_keys <- if (inherits(existing, "try-error")) character(0) else as.character(existing$pitch_key)
   new_rows <- mods_csv[!(mods_csv$pitch_key %in% existing_keys), , drop = FALSE]
+  if (!nrow(new_rows)) return()
+
+  needs_pitcher <- is.na(new_rows$pitcher) | !nzchar(new_rows$pitcher)
+  needs_date <- is.na(new_rows$date) | !nzchar(new_rows$date)
+  if ((any(needs_pitcher) || any(needs_date)) && !is.null(base_data) && nrow(base_data)) {
+    base <- ensure_pitch_keys(base_data)
+    if ("PitchKey" %in% names(base)) {
+      match_idx <- match(new_rows$pitch_key, base$PitchKey)
+      fillable <- !is.na(match_idx)
+      if (any(needs_pitcher & fillable)) {
+        repitch <- as.character(base$Pitcher[match_idx[needs_pitcher & fillable]])
+        new_rows$pitcher[needs_pitcher & fillable] <- repitch
+      }
+      if (any(needs_date & fillable)) {
+        redates <- as.character(base$Date[match_idx[needs_date & fillable]])
+        new_rows$date[needs_date & fillable] <- redates
+      }
+    }
+  }
+
+  required_fields <- c("pitcher", "date", "new_pitch_type", "modified_at")
+  missing_required <- Reduce(`|`, lapply(required_fields, function(col) is.na(new_rows[[col]]) | !nzchar(as.character(new_rows[[col]]))))
+  if (any(missing_required)) {
+    warning(sprintf("Skipping %d invalid modification rows (missing required fields) during import", sum(missing_required)))
+    new_rows <- new_rows[!missing_required, , drop = FALSE]
+  }
   if (!nrow(new_rows)) return()
   dbWriteTable(con, "modifications", new_rows, append = TRUE)
 }
@@ -8151,8 +8207,8 @@ ui <- tagList(
   # --- Custom navbar colors & styling ---
   tags$head(
     tags$style(HTML("
-      /* Black navbar */
-      .navbar-inverse { background-color:#000000; border-color:#000000; }
+      /* Creighton-inspired navy navbar */
+      .navbar-inverse { background-color:#002D72; border-color:#002D72; }
       .navbar { position:relative; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
 
       /* Brand area with two logos side-by-side (left side) */
@@ -8188,19 +8244,24 @@ ui <- tagList(
       /* Tab links */
       .navbar-inverse .navbar-nav>li>a { color:#f2f2f2 !important; font-weight:600; }
       .navbar-inverse .navbar-nav>li>a:hover,
-      .navbar-inverse .navbar-nav>li>a:focus { color:#552B9A !important; background:transparent; }
+      .navbar-inverse .navbar-nav>li>a:focus { color:#00A3E0 !important; background:transparent; }
 
       /* Active tab */
       .navbar-inverse .navbar-nav>.active>a,
       .navbar-inverse .navbar-nav>.active>a:hover,
       .navbar-inverse .navbar-nav>.active>a:focus {
-        color:#ffffff !important; background-color:#552B9A !important;
+        color:#ffffff !important; background-color:#005EB8 !important;
       }
 
       /* Add Note button */
       #openNote {
         border-radius: 999px; padding: 10px 12px; font-size: 16px;
         box-shadow: 0 2px 8px rgba(0,0,0,.25);
+        background-color:#00A3E0; color:#ffffff; border:1px solid #002D72;
+      }
+      #openNote:hover,
+      #openNote:focus {
+        background-color:#005EB8; color:#ffffff;
       }
     "))
   ),
@@ -8233,7 +8294,7 @@ ui <- tagList(
   tags$style(HTML("
     /* Custom note button color */
     #openNote.btn-note {
-      background-color:#552B9A;   /* base */
+      background-color:#005EB8;   /* base */
       border-color:#ffffff;
       color:#fff;
     }
@@ -8241,7 +8302,7 @@ ui <- tagList(
     #openNote.btn-note:focus,
     #openNote.btn-note:active,
     #openNote.btn-note:active:focus {
-      background-color:#000000;   /* hover/active */
+      background-color:#00A3E0;   /* hover/active */
       border-color:#ffffff;
       color:#fff;
       outline:none;
