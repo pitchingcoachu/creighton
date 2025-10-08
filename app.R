@@ -3099,11 +3099,11 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
     
     # ----- TEAM FILTER (LSU only) -----
     # keep your current default if you want
-    TEAM_CODE <- "GRA_CAN"
+    TEAM_CODE <- "CRE_BLU"
     
     # Map team-code synonyms (extend this list as needed)
     TEAM_SYNONYMS <- list(
-      GRA_CAN = c("GRA_CAN")
+      CRE_BLU = c("CRE_BLU")
     )
     
     codes_for <- function(code) {
@@ -5910,11 +5910,11 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
     ns <- session$ns
     
     # ---------- constants ----------
-    TEAM_CODE <- "GRA_CAN"
+    TEAM_CODE <- "CRE_BLU"
     
     # Map team-code synonyms (extend this list as needed)
     TEAM_SYNONYMS <- list(
-      GRA_CAN = c("GRA_CAN")
+      CRE_BLU = c("CRE_BLU")
     )
     
     # ---------- small helpers ----------
@@ -12576,7 +12576,7 @@ server <- function(input, output, session) {
         # Team synonyms for LSU
         codes_for <- function(code) {
           TEAM_SYNONYMS <- list(
-            GRA_CAN = c("GRA_CAN")
+            CRE_BLU = c("CRE_BLU")
           )
           if (code %in% names(TEAM_SYNONYMS)) TEAM_SYNONYMS[[code]] else code
         }
@@ -12591,7 +12591,7 @@ server <- function(input, output, session) {
         # Team synonyms for LSU
         codes_for <- function(code) {
           TEAM_SYNONYMS <- list(
-            GRA_CAN = c("GRA_CAN")
+            CRE_BLU = c("CRE_BLU")
           )
           if (code %in% names(TEAM_SYNONYMS)) TEAM_SYNONYMS[[code]] else code
         }
@@ -12768,7 +12768,7 @@ server <- function(input, output, session) {
         # Team synonyms for LSU
         codes_for <- function(code) {
           TEAM_SYNONYMS <- list(
-            GRA_CAN = c("GRA_CAN")
+            CRE_BLU = c("CRE_BLU")
           )
           if (code %in% names(TEAM_SYNONYMS)) TEAM_SYNONYMS[[code]] else code
         }
