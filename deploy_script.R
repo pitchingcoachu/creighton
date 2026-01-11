@@ -1,5 +1,5 @@
 # deploy_script.R
-# Creighton Baseball App Deployment Script
+# VMI Baseball App Deployment Script
 # Deploys the Shiny app to shinyapps.io
 
 # Set CRAN repository
@@ -27,9 +27,10 @@ deploy_app <- function() {
       
       # Install required packages if not already installed
       required_packages <- c(
-        "shiny", "dplyr", "purrr", "ggplot2", "DT", "gridExtra", 
-        "patchwork", "hexbin", "ggiraph", "httr2", "MASS", 
-        "curl", "readr", "lubridate", "stringr", "akima", 
+        "shiny", "shinyjs", "dplyr", "purrr", "ggplot2", "DT", "gridExtra", 
+        "patchwork", "hexbin", "ggiraph", "httr2", "MASS", "digest",
+        "curl", "readr", "lubridate", "stringr", "akima", "colourpicker",
+        "memoise", "shinymanager", "DBI", "RSQLite",
         "plotly", "RCurl", "jsonlite"
       )
       
@@ -77,7 +78,7 @@ deploy_app <- function() {
 
 # Run deployment
 if (!interactive()) {
-  cat("Creighton - Deployment Script\n")
+  cat("CBU - Deployment Script\n")
   cat("==========================================\n")
   success <- deploy_app()
   if (!success) {
