@@ -102,11 +102,11 @@ school_config <- list(
     "Moseman, Cody"
   ),
   colors = list(
-    primary             = "#0d1224",   # deep navy used in the dark-mode radial gradient (gcu/app.R:17666-17674)
-    accent              = "#667eea",   # start of the active-tab/btn gradient (gcu/app.R:17464-17515)
-    accent_secondary    = "#764ba2",   # end of that same gradient
-    background          = "#f5f7fa",   # light page background (gcu/app.R:17135)
-    background_secondary= "#e8ecf1"   # the matching secondary background tone
+    primary             = "#00245d",   # deep blue pulled from CREIGHTONlogo
+    accent              = "#005daa",   # brighter blue gradient midpoint
+    accent_secondary    = "#6caddf",   # light blue highlight
+    background          = "#ffffff",   # crisp white background to match logo fields
+    background_secondary= "#f4f6fb"    # soft off-white for depth
     
   ),
   logo = "CREIGHTONlogo.png",
