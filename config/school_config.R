@@ -4,7 +4,7 @@ school_config <- list(
   team_code = "Creighton",
   # Additional school-code markers used in TrackMan team columns (optional).
   # These are checked alongside team_code during allowed-player verification.
-  team_code_markers = c("SOU_RED", "Creighton"),
+  team_code_markers = c("CRE_BLU", "Creighton"),
   allowed_pitchers = c(
   "Pineau, Jack",
   "Wendt, Shea",
