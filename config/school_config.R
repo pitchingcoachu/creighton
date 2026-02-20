@@ -14,7 +14,7 @@ school_config <- list(
   "Gould, Brian",
   "Koosman, Ian",
   "Unga, Anthony",
-  "Nissan, Eli",
+  "Nissen, Eli",
   "Curtin, Shane",
   "Burke, Jimmy",
   "Flores, Gavin",
